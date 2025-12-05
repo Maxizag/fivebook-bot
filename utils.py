@@ -53,17 +53,17 @@ def get_time_left_str(answer: Answer) -> str:
 def is_leap_year(year: int) -> bool:
     """
     Проверяет, является ли год високосным
-    
+
+    Правило: год високосный если делится на 400, или делится на 4 и не делится на 100
+    Примеры: 2000 (високосный), 2024 (високосный), 1900 (не високосный), 2100 (не високосный)
+
     Args:
         year: Год для проверки
-        
+
     Returns:
         True если год високосный, False иначе
     """
-    # Упрощённая проверка: год високосный если делится на 4
-    # Для точности: (year % 400 == 0) or (year % 4 == 0 and year % 100 != 0)
-    # Но для бота достаточно простой проверки
-    return year % 4 == 0
+    return (year % 400 == 0) or (year % 4 == 0 and year % 100 != 0)
 
 
 def get_year_keyboard(start_year: int = 2019, buttons_per_row: int = 3) -> InlineKeyboardMarkup:

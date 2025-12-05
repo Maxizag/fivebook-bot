@@ -29,21 +29,17 @@ class ReminderScheduler:
             from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
             from utils import is_leap_year
-        
+
             now = datetime.now()
             date_key = now.strftime("%m-%d")
             current_year = now.year
-            
-            # Если сегоднnowя 29 февраля в невисокосный год - не отправляем напоминание
+
+            # Если сегодня 29 февраля в невисокосный год - не отправляем напоминание
             if date_key == "02-29" and not is_leap_year(current_year):
                 logger.info(f"Skipping reminder for user {user_telegram_id} - Feb 29 in non-leap year")
                 return
-            
+
             user = await get_or_create_user(user_telegram_id)
-            
-            now = datetime.now()
-            date_key = now.strftime("%m-%d")
-            current_year = now.year
             
             # Проверяем, есть ли вопрос для этой даты
             question = await get_question_for_date(user.id, date_key)
