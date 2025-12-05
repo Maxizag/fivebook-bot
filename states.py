@@ -31,3 +31,9 @@ class EditAnswerStates(StatesGroup):
 class DateViewStates(StatesGroup):
     """Состояния для просмотра записей по конкретной дате"""
     waiting_for_date = State()
+
+
+class BackdatedEntryStates(StatesGroup):
+    """Состояния для создания записей задним числом через /date"""
+    waiting_for_backdated_question = State()
+    waiting_for_backdated_answer = State()
