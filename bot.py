@@ -7,7 +7,7 @@ from aiogram.enums import ParseMode
 
 import config
 from database import init_db
-from handlers import start, daily, commands, settings, date_view
+from handlers import start, daily, commands, settings, date_view, evening_reminder
 from scheduler import ReminderScheduler
 
 # Настройка логирования
@@ -42,6 +42,7 @@ async def main():
     dp.include_router(settings.router)
     dp.include_router(commands.router)
     dp.include_router(date_view.router)
+    dp.include_router(evening_reminder.router)
     dp.include_router(daily.router)
     
     # Запуск планировщика напоминаний

@@ -37,3 +37,10 @@ class BackdatedEntryStates(StatesGroup):
     """Состояния для создания записей задним числом через /date"""
     waiting_for_backdated_question = State()
     waiting_for_backdated_answer = State()
+
+
+class EveningReminderStates(StatesGroup):
+    """Состояния для вечернего напоминания в 23:00"""
+    waiting_for_evening_answer = State()
+    waiting_for_evening_question = State()
+    waiting_for_evening_answer_after_question = State()

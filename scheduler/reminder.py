@@ -100,38 +100,155 @@ class ReminderScheduler:
         try:
             users = await get_all_users()
             now = datetime.now()
-            
+
             for user in users:
                 try:
                     # Парсим время напоминания
                     reminder_hour, reminder_minute = map(int, user.reminder_time.split(':'))
-                    
+
                     # Получаем текущее время в часовом поясе пользователя
                     user_tz = pytz.timezone(user.timezone)
                     user_now = datetime.now(user_tz)
-                    
+
                     # Проверяем, совпадает ли время
                     if user_now.hour == reminder_hour and user_now.minute == reminder_minute:
                         await self.send_daily_reminder(user.telegram_id)
-                        
+
                 except Exception as e:
                     logger.error(f"Error processing user {user.telegram_id}: {e}")
-                    
+
         except Exception as e:
             logger.error(f"Error in check_reminders: {e}")
+
+    async def send_evening_reminder(self, user_telegram_id: int):
+        """Отправить вечернее напоминание в 23:00, если за сегодня нет записи"""
+        try:
+            from database import get_or_create_user, get_question_for_date, get_answer_for_year
+            from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+
+            user = await get_or_create_user(user_telegram_id)
+
+            now = datetime.now()
+            date_key = now.strftime("%m-%d")
+            current_year = now.year
+
+            # Проверяем, есть ли вопрос для этой даты
+            question = await get_question_for_date(user.id, date_key)
+
+            # Проверяем, есть ли ответ за сегодняшний год
+            has_answer = False
+            if question:
+                existing_answer = await get_answer_for_year(user.id, question.id, current_year)
+                has_answer = existing_answer is not None
+
+            # Если ответ уже есть - ничего не отправляем
+            if has_answer:
+                logger.info(f"Skipping evening reminder for user {user_telegram_id} - answer already exists")
+                return
+
+            # Вариант 1: Вопрос есть, но нет ответа
+            if question:
+                keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(
+                        text="✍️ Ответить за сегодня",
+                        callback_data="evening_answer_today"
+                    )],
+                    [InlineKeyboardButton(
+                        text="🙈 Пропустить",
+                        callback_data="evening_skip"
+                    )]
+                ])
+
+                await self.bot.send_message(
+                    user_telegram_id,
+                    f"🌙 Уже 23:00, а ответа за сегодня ещё нет.\n\n"
+                    f"Сегодняшний вопрос:\n"
+                    f"<b>{question.question_text}</b>\n\n"
+                    f"Хочешь записать ответ сейчас?",
+                    parse_mode="HTML",
+                    reply_markup=keyboard
+                )
+            else:
+                # Вариант 2: Вопроса для этой даты ещё нет
+                keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(
+                        text="✍️ Добавить вопрос и ответ",
+                        callback_data="evening_add_question"
+                    )],
+                    [InlineKeyboardButton(
+                        text="🙈 Пропустить",
+                        callback_data="evening_skip"
+                    )]
+                ])
+
+                await self.bot.send_message(
+                    user_telegram_id,
+                    "🌙 Уже 23:00, а записи за сегодня ещё нет.\n\n"
+                    "Хочешь добавить вопрос и ответ за сегодняшний день?",
+                    reply_markup=keyboard
+                )
+
+            logger.info(f"Evening reminder sent to user {user_telegram_id}")
+
+        except Exception as e:
+            logger.error(f"Error sending evening reminder to user {user_telegram_id}: {e}")
+
+    async def check_evening_reminders(self):
+        """Проверить, кому нужно отправить вечерние напоминания в 23:00"""
+        try:
+            users = await get_all_users()
+
+            for user in users:
+                try:
+                    # Получаем текущее время в часовом поясе пользователя
+                    user_tz = pytz.timezone(user.timezone)
+                    user_now = datetime.now(user_tz)
+
+                    # Парсим основное время напоминания
+                    reminder_hour, reminder_minute = map(int, user.reminder_time.split(':'))
+
+                    # Проверяем, что сейчас 23:00 по локальному времени пользователя
+                    # И что основное напоминание не установлено на 23:00 (чтобы не дублировать)
+                    if user_now.hour == 23 and user_now.minute == 0:
+                        # Если основное напоминание на 23:00, отправляем вечернее в 22:30
+                        if reminder_hour == 23 and reminder_minute == 0:
+                            # Пропускаем, чтобы не дублировать
+                            logger.info(f"Skipping evening reminder for user {user.telegram_id} - main reminder is at 23:00")
+                            continue
+
+                        await self.send_evening_reminder(user.telegram_id)
+
+                    # Альтернативный вариант: если основное напоминание на 23:00, отправляем вечернее в 22:30
+                    elif user_now.hour == 22 and user_now.minute == 30:
+                        if reminder_hour == 23 and reminder_minute == 0:
+                            await self.send_evening_reminder(user.telegram_id)
+
+                except Exception as e:
+                    logger.error(f"Error processing evening reminder for user {user.telegram_id}: {e}")
+
+        except Exception as e:
+            logger.error(f"Error in check_evening_reminders: {e}")
     
     def start(self):
         """Запустить планировщик"""
-        # Проверяем каждую минуту
+        # Проверяем каждую минуту утренние напоминания
         self.scheduler.add_job(
             self.check_reminders,
             trigger=CronTrigger(minute='*'),
             id='check_reminders',
             replace_existing=True
         )
-        
+
+        # Проверяем каждую минуту вечерние напоминания
+        self.scheduler.add_job(
+            self.check_evening_reminders,
+            trigger=CronTrigger(minute='*'),
+            id='check_evening_reminders',
+            replace_existing=True
+        )
+
         self.scheduler.start()
-        logger.info("Reminder scheduler started")
+        logger.info("Reminder scheduler started (morning and evening)")
     
     def shutdown(self):
         """Остановить планировщик"""
