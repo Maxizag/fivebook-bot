@@ -228,7 +228,108 @@ class ReminderScheduler:
 
         except Exception as e:
             logger.error(f"Error in check_evening_reminders: {e}")
-    
+
+    async def send_morning_yesterday_reminder(self, user_telegram_id: int):
+        """Отправить утреннее напоминание в 09:00 про пропущенный вчерашний день"""
+        try:
+            from database import get_or_create_user, get_question_for_date, get_answer_for_year
+            from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+
+            user = await get_or_create_user(user_telegram_id)
+
+            # Получаем вчерашнюю дату
+            now = datetime.now()
+            yesterday = now - timedelta(days=1)
+            yesterday_date_key = yesterday.strftime("%m-%d")
+            yesterday_year = yesterday.year
+
+            # Проверяем, есть ли вопрос для вчерашней даты
+            question = await get_question_for_date(user.id, yesterday_date_key)
+
+            # Проверяем, есть ли ответ за вчерашний год
+            has_answer = False
+            if question:
+                existing_answer = await get_answer_for_year(user.id, question.id, yesterday_year)
+                has_answer = existing_answer is not None
+
+            # Если ответ уже есть - ничего не отправляем
+            if has_answer:
+                logger.info(f"Skipping morning yesterday reminder for user {user_telegram_id} - answer already exists")
+                return
+
+            # Форматируем вчерашнюю дату для отображения (ДД.ММ)
+            yesterday_label = yesterday.strftime("%d.%m")
+
+            # Вариант 1: Вопрос есть, но нет ответа
+            if question:
+                keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(
+                        text=f"✍️ Записать ответ за {yesterday_label}",
+                        callback_data=f"morning_yesterday_answer:{yesterday_date_key}:{yesterday_year}"
+                    )],
+                    [InlineKeyboardButton(
+                        text="🙈 Пропустить вчера",
+                        callback_data="morning_yesterday_skip"
+                    )]
+                ])
+
+                await self.bot.send_message(
+                    user_telegram_id,
+                    f"Доброе утро! ☀️\\n\\n"
+                    f"Похоже, вчера ({yesterday_label}) ты не успела сделать запись.\\n\\n"
+                    f"Вопрос дня:\\n"
+                    f"<b>{question.question_text}</b>\\n\\n"
+                    f"Хочешь записать ответ за вчера сейчас?",
+                    parse_mode="HTML",
+                    reply_markup=keyboard
+                )
+            else:
+                # Вариант 2: Вопроса для вчерашней даты ещё нет
+                keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(
+                        text=f"✍️ Добавить вопрос и ответ за {yesterday_label}",
+                        callback_data=f"morning_yesterday_add:{yesterday_date_key}:{yesterday_year}"
+                    )],
+                    [InlineKeyboardButton(
+                        text="🙈 Пропустить вчера",
+                        callback_data="morning_yesterday_skip"
+                    )]
+                ])
+
+                await self.bot.send_message(
+                    user_telegram_id,
+                    f"Доброе утро! ☀️\\n\\n"
+                    f"Похоже, вчера ({yesterday_label}) ты не успела сделать запись.\\n\\n"
+                    f"Хочешь добавить вопрос и ответ за вчера сейчас?",
+                    reply_markup=keyboard
+                )
+
+            logger.info(f"Morning yesterday reminder sent to user {user_telegram_id}")
+
+        except Exception as e:
+            logger.error(f"Error sending morning yesterday reminder to user {user_telegram_id}: {e}")
+
+    async def check_morning_yesterday_reminders(self):
+        """Проверить, кому нужно отправить утренние напоминания про вчерашний день в 09:00"""
+        try:
+            users = await get_all_users()
+
+            for user in users:
+                try:
+                    # Получаем текущее время в часовом поясе пользователя
+                    user_tz = pytz.timezone(user.timezone)
+                    user_now = datetime.now(user_tz)
+
+                    # Проверяем, что сейчас 09:00 по локальному времени пользователя
+                    if user_now.hour == 9 and user_now.minute == 0:
+                        await self.send_morning_yesterday_reminder(user.telegram_id)
+
+                except Exception as e:
+                    logger.error(f"Error processing morning yesterday reminder for user {user.telegram_id}: {e}")
+
+        except Exception as e:
+            logger.error(f"Error in check_morning_yesterday_reminders: {e}")
+
     def start(self):
         """Запустить планировщик"""
         # Проверяем каждую минуту утренние напоминания
@@ -247,8 +348,16 @@ class ReminderScheduler:
             replace_existing=True
         )
 
+        # Проверяем каждую минуту утренние напоминания про вчерашний день
+        self.scheduler.add_job(
+            self.check_morning_yesterday_reminders,
+            trigger=CronTrigger(minute='*'),
+            id='check_morning_yesterday_reminders',
+            replace_existing=True
+        )
+
         self.scheduler.start()
-        logger.info("Reminder scheduler started (morning and evening)")
+        logger.info("Reminder scheduler started (morning, evening, and morning yesterday)")
     
     def shutdown(self):
         """Остановить планировщик"""

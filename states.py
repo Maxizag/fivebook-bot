@@ -44,3 +44,10 @@ class EveningReminderStates(StatesGroup):
     waiting_for_evening_answer = State()
     waiting_for_evening_question = State()
     waiting_for_evening_answer_after_question = State()
+
+
+class MorningYesterdayStates(StatesGroup):
+    """Состояния для утреннего напоминания в 09:00 про пропущенный вчерашний день"""
+    waiting_for_yesterday_answer = State()
+    waiting_for_yesterday_question = State()
+    waiting_for_yesterday_answer_after_question = State()
