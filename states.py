@@ -67,3 +67,8 @@ class CalendarAnswerStates(StatesGroup):
 class CalendarEditStates(StatesGroup):
     """Состояния для редактирования ответа через календарь"""
     waiting_for_edited_answer = State()
+
+
+class CalendarYearSelectionStates(StatesGroup):
+    """Состояния для выбора года при добавлении ответа"""
+    waiting_for_year = State()

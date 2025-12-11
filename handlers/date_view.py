@@ -13,7 +13,14 @@ from database import (
     create_answer,
     get_answer_for_year
 )
-from states import DateViewStates, BackdatedEntryStates, CalendarQuestionStates, CalendarAnswerStates, CalendarEditStates
+from states import (
+    DateViewStates,
+    BackdatedEntryStates,
+    CalendarQuestionStates,
+    CalendarAnswerStates,
+    CalendarEditStates,
+    CalendarYearSelectionStates
+)
 
 router = Router()
 
@@ -52,101 +59,83 @@ def _parse_user_date(date_text: str) -> str | None:
 
 
 async def _render_date_view(target: Message | CallbackQuery, date_key: str, year: int = None, state: FSMContext = None):
-    """Отображает вопрос и ответы для указанной даты и года."""
+    """Отображает вопрос и ответы для указанной даты."""
     telegram_id = target.from_user.id
     user = await get_or_create_user(telegram_id)
     question = await get_question_for_date(user.id, date_key)
-
-    # Если год не указан, используем текущий год
-    if year is None:
-        year = datetime.now().year
+    answers = await get_answers_for_question(question.id) if question else []
 
     date_label = _format_date_label(date_key)
+    lines: list[str] = [f"📅 Дата: <b>{date_label}</b>"]
 
     # Строим клавиатуру
     keyboard_buttons = []
 
     # Сценарий 1: Вопроса нет
     if not question:
-        text = (
-            f"📅 Дата: <b>{date_label}</b>\n\n"
+        lines.append(
             f"Для даты {date_label} у тебя пока нет вопроса.\n"
             f"Хочешь создать вопрос для этой даты?"
         )
 
-        # Кнопки: Создать вопрос | Назад
+        # Кнопки: Создать вопрос
         keyboard_buttons.append([
             InlineKeyboardButton(
                 text="➕ Создать вопрос",
-                callback_data=f"calendar_create_question:{date_key}:{year}"
+                callback_data=f"calendar_create_question:{date_key}:{datetime.now().year}"
             )
         ])
     else:
-        # Проверяем наличие ответа за выбранный год
-        answer = await get_answer_for_year(user.id, question.id, year)
+        # Показываем вопрос
+        lines.append(f"<b>Вопрос:</b>\n{question.question_text}")
 
-        # Сценарий 2: Вопрос есть, но ответа за выбранный год нет
-        if not answer:
-            text = (
-                f"📅 Дата: <b>{date_label}</b>\n"
-                f"📆 Год: <b>{year}</b>\n\n"
-                f"<b>Вопрос:</b>\n{question.question_text}\n\n"
-                f"У тебя нет ответа за {year} для даты {date_label}.\n"
-                f"Хочешь записать?"
-            )
+        # Показываем все ответы по годам
+        if answers:
+            lines.append("<b>Ответы по годам:</b>")
+            for answer in answers:
+                # Проверяем, можно ли редактировать/удалять этот ответ (меньше 24 часов)
+                time_since_creation = datetime.utcnow() - answer.created_at
+                can_edit = time_since_creation.total_seconds() < 24 * 3600
 
-            # Кнопки: Записать ответ | Назад
-            keyboard_buttons.append([
-                InlineKeyboardButton(
-                    text="✍️ Записать ответ",
-                    callback_data=f"calendar_add_answer:{date_key}:{year}:{question.id}"
-                )
-            ])
+                answer_line = f"• <b>{answer.year}</b>: {answer.answer_text}"
+                lines.append(answer_line)
+
+                # Добавляем кнопки редактирования/удаления для каждого ответа, если <24ч
+                if can_edit:
+                    keyboard_buttons.append([
+                        InlineKeyboardButton(
+                            text=f"✏️ Изменить ответ за {answer.year}",
+                            callback_data=f"calendar_edit_answer:{date_key}:{answer.year}:{answer.id}"
+                        ),
+                        InlineKeyboardButton(
+                            text=f"🗑 Удалить за {answer.year}",
+                            callback_data=f"calendar_delete_answer:{date_key}:{answer.year}:{answer.id}"
+                        )
+                    ])
         else:
-            # Сценарий 3: Вопрос и ответ есть
-            text = (
-                f"📅 Дата: <b>{date_label}</b>\n"
-                f"📆 Год: <b>{year}</b>\n\n"
-                f"<b>Вопрос:</b>\n{question.question_text}\n\n"
-                f"<b>Ответ:</b>\n{answer.answer_text}"
+            lines.append("Ответов пока нет. ✍️")
+
+        # Кнопка "Добавить ответ за прошлый год"
+        keyboard_buttons.append([
+            InlineKeyboardButton(
+                text="➕ Добавить ответ за прошлый год",
+                callback_data=f"calendar_select_year:{date_key}:{question.id}"
             )
+        ])
 
-            # Проверяем, прошло ли меньше 24 часов с момента создания ответа
-            time_since_creation = datetime.utcnow() - answer.created_at
-            can_edit = time_since_creation.total_seconds() < 24 * 3600
+    text = "\n\n".join(lines)
 
-            # Кнопки: Изменить | Удалить (только если <24 часов)
-            if can_edit:
-                keyboard_buttons.append([
-                    InlineKeyboardButton(
-                        text="✏️ Изменить",
-                        callback_data=f"calendar_edit_answer:{date_key}:{year}:{answer.id}"
-                    ),
-                    InlineKeyboardButton(
-                        text="🗑 Удалить",
-                        callback_data=f"calendar_delete_answer:{date_key}:{year}:{answer.id}"
-                    )
-                ])
-
-    # Добавляем кнопку "Назад" для всех сценариев
-    keyboard_buttons.append([
-        InlineKeyboardButton(
-            text="↩️ Назад",
-            callback_data=f"calendar_back:{date_key}:{year}"
-        )
-    ])
-
-    # Добавляем навигационные кнопки (с сохранением года)
+    # Добавляем навигационные кнопки
     prev_key = _shift_date_key(date_key, -1)
     next_key = _shift_date_key(date_key, 1)
     keyboard_buttons.append([
         InlineKeyboardButton(
             text=f"◀ {_format_date_label(prev_key)}",
-            callback_data=f"date_prev:{date_key}:{year}"
+            callback_data=f"date_prev:{date_key}"
         ),
         InlineKeyboardButton(
             text=f"{_format_date_label(next_key)} ▶",
-            callback_data=f"date_next:{date_key}:{year}"
+            callback_data=f"date_next:{date_key}"
         )
     ])
 
@@ -187,22 +176,18 @@ async def process_date_input(message: Message, state: FSMContext):
 async def show_previous_day(callback: CallbackQuery):
     """Перейти к предыдущему дню."""
     await callback.answer()
-    parts = callback.data.split(":")
-    current_date_key = parts[1]
-    year = int(parts[2]) if len(parts) > 2 else datetime.now().year
+    current_date_key = callback.data.split(":", 1)[1]
     prev_date_key = _shift_date_key(current_date_key, -1)
-    await _render_date_view(callback, prev_date_key, year)
+    await _render_date_view(callback, prev_date_key)
 
 
 @router.callback_query(F.data.startswith("date_next:"))
 async def show_next_day(callback: CallbackQuery):
     """Перейти к следующему дню."""
     await callback.answer()
-    parts = callback.data.split(":")
-    current_date_key = parts[1]
-    year = int(parts[2]) if len(parts) > 2 else datetime.now().year
+    current_date_key = callback.data.split(":", 1)[1]
     next_date_key = _shift_date_key(current_date_key, 1)
-    await _render_date_view(callback, next_date_key, year)
+    await _render_date_view(callback, next_date_key)
 
 
 @router.callback_query(F.data.startswith("add_backdated:"))
@@ -303,14 +288,73 @@ async def process_backdated_answer(message: Message, state: FSMContext):
 # ============================================================================
 
 
-@router.callback_query(F.data.startswith("calendar_back:"))
-async def calendar_back(callback: CallbackQuery):
-    """Возврат к просмотру даты."""
+@router.callback_query(F.data.startswith("calendar_select_year:"))
+async def calendar_select_year(callback: CallbackQuery, state: FSMContext):
+    """Начать выбор года для добавления ответа."""
     await callback.answer()
+
     parts = callback.data.split(":")
     date_key = parts[1]
-    year = int(parts[2])
-    await _render_date_view(callback, date_key, year)
+    question_id = int(parts[2])
+    date_label = _format_date_label(date_key)
+
+    # Сохраняем информацию в state
+    user = await get_or_create_user(callback.from_user.id)
+    await state.update_data(
+        calendar_date_key=date_key,
+        calendar_date_label=date_label,
+        question_id=question_id,
+        user_db_id=user.id
+    )
+
+    await callback.message.answer(
+        f"За какой год хочешь записать ответ для даты {date_label}?\n\n"
+        f"Напиши год (например: 2023, 2022, 2021)"
+    )
+
+    await state.set_state(CalendarYearSelectionStates.waiting_for_year)
+
+
+@router.message(CalendarYearSelectionStates.waiting_for_year)
+async def process_year_selection(message: Message, state: FSMContext):
+    """Обработка выбранного года для добавления ответа."""
+    year_text = message.text.strip()
+
+    # Проверяем, что введён корректный год
+    try:
+        year = int(year_text)
+        if year < 1900 or year > datetime.now().year:
+            await message.answer(
+                f"Год должен быть в диапазоне от 1900 до {datetime.now().year}. Попробуй ещё раз."
+            )
+            return
+    except ValueError:
+        await message.answer("Пожалуйста, введи корректный год (например: 2023)")
+        return
+
+    data = await state.get_data()
+    user_db_id = data.get("user_db_id")
+    question_id = data.get("question_id")
+    date_key = data.get("calendar_date_key")
+    date_label = data.get("calendar_date_label")
+
+    # Проверяем, есть ли уже ответ за этот год
+    existing_answer = await get_answer_for_year(user_db_id, question_id, year)
+    if existing_answer:
+        await message.answer(
+            f"У тебя уже есть ответ за {year} для даты {date_label}.\n"
+            f"Выбери другой год или используй кнопку редактирования."
+        )
+        return
+
+    # Сохраняем год в state
+    await state.update_data(calendar_year=year)
+
+    await message.answer(
+        f"Отлично! Теперь напиши свой ответ за {date_label}.{year} 👇"
+    )
+
+    await state.set_state(CalendarAnswerStates.waiting_for_answer)
 
 
 @router.callback_query(F.data.startswith("calendar_create_question:"))
