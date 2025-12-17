@@ -290,7 +290,100 @@ async def process_backdated_answer(message: Message, state: FSMContext):
 
 @router.callback_query(F.data.startswith("calendar_select_year:"))
 async def calendar_select_year(callback: CallbackQuery, state: FSMContext):
-    """Начать выбор года для добавления ответа."""
+    """Показать кнопки для выбора года."""
+    await callback.answer()
+
+    parts = callback.data.split(":")
+    date_key = parts[1]
+    question_id = int(parts[2])
+    date_label = _format_date_label(date_key)
+
+    # Сохраняем информацию в state
+    user = await get_or_create_user(callback.from_user.id)
+    await state.update_data(
+        calendar_date_key=date_key,
+        calendar_date_label=date_label,
+        question_id=question_id,
+        user_db_id=user.id
+    )
+
+    # Создаём кнопки с годами
+    current_year = datetime.now().year
+    keyboard_buttons = []
+
+    # Добавляем годы с 2019 по текущий год в обратном порядке (сначала текущий)
+    years = list(range(2019, current_year + 1))
+    years.reverse()
+
+    # Размещаем по 3 кнопки в ряд
+    for i in range(0, len(years), 3):
+        row = []
+        for year in years[i:i+3]:
+            row.append(InlineKeyboardButton(
+                text=str(year),
+                callback_data=f"calendar_year_selected:{date_key}:{question_id}:{year}"
+            ))
+        keyboard_buttons.append(row)
+
+    # Кнопка "Другой год" для ввода вручную
+    keyboard_buttons.append([
+        InlineKeyboardButton(
+            text="✍️ Ввести другой год",
+            callback_data=f"calendar_custom_year:{date_key}:{question_id}"
+        )
+    ])
+
+    keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
+
+    await callback.message.answer(
+        f"За какой год хочешь записать ответ для даты {date_label}?\n\n"
+        f"Выбери год из списка или напиши год вручную:",
+        reply_markup=keyboard
+    )
+
+
+@router.callback_query(F.data.startswith("calendar_year_selected:"))
+async def calendar_year_selected(callback: CallbackQuery, state: FSMContext):
+    """Обработка выбранного года из кнопок."""
+    await callback.answer()
+
+    parts = callback.data.split(":")
+    date_key = parts[1]
+    question_id = int(parts[2])
+    year = int(parts[3])
+    date_label = _format_date_label(date_key)
+
+    # Получаем данные пользователя
+    user = await get_or_create_user(callback.from_user.id)
+
+    # Проверяем, есть ли уже ответ за этот год
+    existing_answer = await get_answer_for_year(user.id, question_id, year)
+    if existing_answer:
+        await callback.message.answer(
+            f"У тебя уже есть ответ за {year} для даты {date_label}.\n"
+            f"Выбери другой год или используй кнопку редактирования."
+        )
+        return
+
+    # Сохраняем данные в state
+    await state.update_data(
+        calendar_date_key=date_key,
+        calendar_year=year,
+        calendar_date_label=date_label,
+        question_id=question_id,
+        user_db_id=user.id
+    )
+
+    await callback.message.answer(
+        f"Отлично! Теперь напиши свой ответ за {date_label}.{year} 👇"
+    )
+
+    await state.set_state(CalendarAnswerStates.waiting_for_answer)
+
+
+@router.callback_query(F.data.startswith("calendar_custom_year:"))
+async def calendar_custom_year(callback: CallbackQuery, state: FSMContext):
+    """Ввод года вручную."""
     await callback.answer()
 
     parts = callback.data.split(":")
@@ -308,8 +401,7 @@ async def calendar_select_year(callback: CallbackQuery, state: FSMContext):
     )
 
     await callback.message.answer(
-        f"За какой год хочешь записать ответ для даты {date_label}?\n\n"
-        f"Напиши год (например: 2023, 2022, 2021)"
+        f"Напиши год для даты {date_label} (например: 2018, 2017, 2010):"
     )
 
     await state.set_state(CalendarYearSelectionStates.waiting_for_year)
