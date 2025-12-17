@@ -37,3 +37,38 @@ class BackdatedEntryStates(StatesGroup):
     """Состояния для создания записей задним числом через /date"""
     waiting_for_backdated_question = State()
     waiting_for_backdated_answer = State()
+
+
+class EveningReminderStates(StatesGroup):
+    """Состояния для вечернего напоминания в 23:00"""
+    waiting_for_evening_answer = State()
+    waiting_for_evening_question = State()
+    waiting_for_evening_answer_after_question = State()
+
+
+class MorningYesterdayStates(StatesGroup):
+    """Состояния для утреннего напоминания в 09:00 про пропущенный вчерашний день"""
+    waiting_for_yesterday_answer = State()
+    waiting_for_yesterday_question = State()
+    waiting_for_yesterday_answer_after_question = State()
+
+
+class CalendarQuestionStates(StatesGroup):
+    """Состояния для создания вопроса через календарь"""
+    waiting_for_question = State()
+    waiting_for_answer_after_question = State()
+
+
+class CalendarAnswerStates(StatesGroup):
+    """Состояния для добавления ответа через календарь"""
+    waiting_for_answer = State()
+
+
+class CalendarEditStates(StatesGroup):
+    """Состояния для редактирования ответа через календарь"""
+    waiting_for_edited_answer = State()
+
+
+class CalendarYearSelectionStates(StatesGroup):
+    """Состояния для выбора года при добавлении ответа"""
+    waiting_for_year = State()
